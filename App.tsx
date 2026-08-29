@@ -12,54 +12,156 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
+import { Hello } from './src/components/Hello';
+import { NoteCard } from './src/components/NoteCard';
 import { Pingu } from './src/components/Pingu';
-import { SpeechBubble } from './src/components/SpeechBubble';
 import { TodoRow } from './src/components/TodoRow';
 import { celebrate, tap } from './src/haptics';
-import { lineFor, moodFor } from './src/mood';
+import { pickNote } from './src/notes';
 import { asyncStorageStore } from './src/storage';
-import { theme } from './src/theme';
+import { noFocusRing, theme } from './src/theme';
 import { Filter } from './src/types';
 import { useTodos } from './src/useTodos';
+import { hush, say } from './src/voice';
 
 const { colors } = theme;
 const FILTERS: Filter[] = ['all', 'active', 'done'];
-const CHEER_MS = 1800;
+const CHEER_MS = 2600;
+/** Roughly how long Pingu's mouth stays "moving" after he starts a note. */
+const SPEAK_MS = 2800;
 
 export default function App() {
-  const { ready, todos, visible, fish, filter, setFilter, add, toggle, remove, clearDone } =
-    useTodos(asyncStorageStore);
-  const [draft, setDraft] = useState('');
-  const [cheering, setCheering] = useState(false);
-  const cheerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {
+    ready,
+    todos,
+    visible,
+    fish,
+    name,
+    greeted,
+    voiceOn,
+    daysAway,
+    filter,
+    setFilter,
+    add,
+    toggle,
+    remove,
+    clearDone,
+    setName,
+    toggleVoice,
+  } = useTodos(asyncStorageStore);
 
-  useEffect(() => () => {
-    if (cheerTimer.current) clearTimeout(cheerTimer.current);
-  }, []);
+  const [draft, setDraft] = useState('');
+  const [rotation, setRotation] = useState(0);
+  const [cheering, setCheering] = useState(false);
+  const [lastDone, setLastDone] = useState<string | null>(null);
+  const [speaking, setSpeaking] = useState(false);
+  const cheerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speakTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (cheerTimer.current) clearTimeout(cheerTimer.current);
+      if (speakTimer.current) clearTimeout(speakTimer.current);
+      hush();
+    },
+    []
+  );
 
   const openCount = todos.filter((t) => !t.done).length;
   const doneCount = todos.length - openCount;
-  const mood = moodFor(todos, cheering);
-  const line = useMemo(() => lineFor(mood, todos.length + fish), [mood, todos.length, fish]);
+
+  const note = useMemo(
+    () =>
+      pickNote(
+        {
+          name,
+          now: new Date(),
+          todos,
+          fish,
+          daysAway,
+          justCompleted: cheering,
+          lastCompletedTitle: lastDone,
+        },
+        rotation
+      ),
+    // `rotation` is what makes a tap produce a different line from the same bucket.
+    [name, todos, fish, daysAway, cheering, lastDone, rotation]
+  );
+
+  /** Says a note out loud (when voice is on) and animates the bubble while he talks. */
+  function speak(text: string) {
+    if (!voiceOn) return;
+    say(text);
+    setSpeaking(true);
+    if (speakTimer.current) clearTimeout(speakTimer.current);
+    speakTimer.current = setTimeout(() => setSpeaking(false), SPEAK_MS);
+  }
+
+  function handlePinguTap() {
+    tap();
+    setRotation((r) => r + 1);
+    // The note for the *next* rotation is what the user is about to read, so
+    // compute it here rather than speaking the one currently on screen.
+    const next = pickNote(
+      {
+        name,
+        now: new Date(),
+        todos,
+        fish,
+        daysAway,
+        justCompleted: cheering,
+        lastCompletedTitle: lastDone,
+      },
+      rotation + 1
+    );
+    speak(next.text);
+  }
 
   function handleToggle(id: string) {
-    const wasDone = todos.find((t) => t.id === id)?.done;
+    const target = todos.find((t) => t.id === id);
     toggle(id);
-    if (wasDone) {
+    if (target?.done) {
       tap();
       return;
     }
     celebrate();
+    setLastDone(target?.title ?? null);
     setCheering(true);
     if (cheerTimer.current) clearTimeout(cheerTimer.current);
     cheerTimer.current = setTimeout(() => setCheering(false), CHEER_MS);
   }
+
+  // Congratulations are the one note Pingu volunteers without being tapped.
+  useEffect(() => {
+    if (!cheering) return;
+    speak(note.text);
+    // Only fire on the transition into cheering, not on every note recompute.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cheering]);
 
   function handleAdd() {
     if (!draft.trim()) return;
     add(draft);
     setDraft('');
     tap();
+  }
+
+  function handleHello(chosen: string) {
+    setName(chosen);
+    tap();
+  }
+
+  if (!ready) {
+    return <SafeAreaView style={styles.safe} />;
+  }
+
+  if (!greeted) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <StatusBar style="dark" />
+        <Hello onDone={handleHello} />
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -70,19 +172,37 @@ export default function App() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.header}>
-          <SpeechBubble text={line} />
-          <Pingu mood={mood} size={132} />
+          <NoteCard text={note.text} speaking={speaking} />
+          <Pressable
+            onPress={handlePinguTap}
+            accessibilityRole="button"
+            accessibilityLabel="Ask Pingu for another note"
+          >
+            <Pingu mood={note.mood} size={132} speaking={speaking} />
+          </Pressable>
           <View style={styles.stats}>
             <Text style={styles.stat}>
               {openCount} to go · {doneCount} done
             </Text>
             <Text style={styles.fish}>🐟 {fish}</Text>
+            <Pressable
+              onPress={() => {
+                if (voiceOn) hush();
+                toggleVoice();
+              }}
+              hitSlop={8}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: voiceOn }}
+              accessibilityLabel="Pingu's voice"
+            >
+              <Text style={styles.voice}>{voiceOn ? '🔊' : '🔇'}</Text>
+            </Pressable>
           </View>
         </View>
 
         <View style={styles.composer}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, noFocusRing]}
             value={draft}
             onChangeText={setDraft}
             placeholder="What should Pingu nag you about?"
@@ -129,13 +249,11 @@ export default function App() {
             <TodoRow todo={item} onToggle={handleToggle} onRemove={remove} />
           )}
           ListEmptyComponent={
-            ready ? (
-              <Text style={styles.empty}>
-                {todos.length === 0
-                  ? 'No tasks. Pingu is suspicious of your productivity.'
-                  : 'Nothing in this filter.'}
-              </Text>
-            ) : null
+            <Text style={styles.empty}>
+              {todos.length === 0
+                ? 'No tasks. Pingu is suspicious of your productivity.'
+                : 'Nothing in this filter.'}
+            </Text>
           }
         />
       </KeyboardAvoidingView>
@@ -147,13 +265,10 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.ice },
   flex: { flex: 1 },
   header: { alignItems: 'center', paddingTop: theme.space(4), gap: theme.space(2) },
-  stats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space(4),
-  },
+  stats: { flexDirection: 'row', alignItems: 'center', gap: theme.space(4) },
   stat: { color: colors.slate, fontSize: 14, fontWeight: '600' },
   fish: { color: colors.fish, fontSize: 14, fontWeight: '700' },
+  voice: { fontSize: 15 },
   composer: {
     flexDirection: 'row',
     gap: theme.space(2),

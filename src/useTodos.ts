@@ -12,6 +12,7 @@ export function useTodos(store: Store) {
   const [state, setState] = useState<AppState>(emptyState);
   const [ready, setReady] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
+  const [daysAway, setDaysAway] = useState(0);
   const loaded = useRef(false);
 
   useEffect(() => {
@@ -20,7 +21,12 @@ export function useTodos(store: Store) {
       .load()
       .then((loadedState) => {
         if (cancelled) return;
-        setState(loadedState);
+        // Read how long you were gone before stamping this visit over it.
+        if (loadedState.lastSeenAt) {
+          const days = Math.floor((Date.now() - loadedState.lastSeenAt) / (24 * 60 * 60 * 1000));
+          setDaysAway(Math.max(0, days));
+        }
+        setState({ ...loadedState, lastSeenAt: Date.now() });
       })
       .finally(() => {
         if (cancelled) return;
@@ -58,6 +64,7 @@ export function useTodos(store: Store) {
       if (!target) return s;
       const nowDone = !target.done;
       return {
+        ...s,
         todos: s.todos.map((t) =>
           t.id === id ? { ...t, done: nowDone, completedAt: nowDone ? Date.now() : null } : t
         ),
@@ -72,6 +79,7 @@ export function useTodos(store: Store) {
     setState((s) => {
       const target = s.todos.find((t) => t.id === id);
       return {
+        ...s,
         todos: s.todos.filter((t) => t.id !== id),
         fish: target?.done ? Math.max(0, s.fish - 1) : s.fish,
       };
@@ -80,6 +88,15 @@ export function useTodos(store: Store) {
 
   const clearDone = useCallback(() => {
     setState((s) => ({ ...s, todos: s.todos.filter((t) => !t.done) }));
+  }, []);
+
+  const setName = useCallback((name: string) => {
+    const trimmed = name.trim().slice(0, 24);
+    setState((s) => ({ ...s, name: trimmed || null, greeted: true }));
+  }, []);
+
+  const toggleVoice = useCallback(() => {
+    setState((s) => ({ ...s, voiceOn: !s.voiceOn }));
   }, []);
 
   const visible = state.todos.filter((t) =>
@@ -91,11 +108,17 @@ export function useTodos(store: Store) {
     todos: state.todos,
     visible,
     fish: state.fish,
+    name: state.name,
+    greeted: state.greeted,
+    voiceOn: state.voiceOn,
+    daysAway,
     filter,
     setFilter,
     add,
     toggle,
     remove,
     clearDone,
+    setName,
+    toggleVoice,
   };
 }

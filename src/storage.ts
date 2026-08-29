@@ -26,7 +26,14 @@ export function parseState(raw: string | null): AppState {
     const parsed = JSON.parse(raw) as Partial<AppState>;
     const todos = Array.isArray(parsed.todos) ? parsed.todos.filter(isTodoish) : [];
     const fish = typeof parsed.fish === 'number' && parsed.fish >= 0 ? parsed.fish : 0;
-    return { todos: todos as AppState['todos'], fish };
+    return {
+      todos: todos as AppState['todos'],
+      fish,
+      name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name : null,
+      greeted: parsed.greeted === true,
+      lastSeenAt: typeof parsed.lastSeenAt === 'number' ? parsed.lastSeenAt : null,
+      voiceOn: typeof parsed.voiceOn === 'boolean' ? parsed.voiceOn : true,
+    };
   } catch {
     return emptyState;
   }

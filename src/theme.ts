@@ -15,3 +15,9 @@ export const theme = {
   radius: { sm: 8, md: 14, lg: 22, pill: 999 },
   space: (n: number) => n * 4,
 };
+
+/**
+ * react-native-web renders TextInput as a real <input>, which brings the
+ * browser's focus ring with it. The style is web-only, hence the cast.
+ */
+export const noFocusRing = { outlineStyle: 'none' } as unknown as object;

@@ -5,29 +5,35 @@ import { theme } from '../theme';
 
 const { colors } = theme;
 
-type Props = { mood: Mood; size?: number };
+type Props = { mood: Mood; size?: number; speaking?: boolean };
 
 /**
  * Pingu, drawn entirely with Views so the app carries no SVG or image
- * dependency. He idles with a slow bob and does a bigger hop when cheering.
+ * dependency. Everything is positioned inside a 120x140 box and scaled by `s`,
+ * so the numbers below can be read as a fixed drawing.
+ *
+ * Draw order matters: flippers and feet go down first so the body overlaps
+ * them, then the head sits on top of the body, then the face on the head.
  */
-export function Pingu({ mood, size = 120 }: Props) {
+export function Pingu({ mood, size = 120, speaking = false }: Props) {
   const bob = useRef(new Animated.Value(0)).current;
   const hop = useRef(new Animated.Value(0)).current;
+  const talk = useRef(new Animated.Value(0)).current;
   const s = size / 120;
 
   useEffect(() => {
+    const beat = mood === 'panicking' ? 380 : 1400;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(bob, {
           toValue: 1,
-          duration: mood === 'panicking' ? 380 : 1400,
+          duration: beat,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(bob, {
           toValue: 0,
-          duration: mood === 'panicking' ? 380 : 1400,
+          duration: beat,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
@@ -51,107 +57,225 @@ export function Pingu({ mood, size = 120 }: Props) {
     ]).start();
   }, [hop, mood]);
 
+  useEffect(() => {
+    if (!speaking) {
+      talk.stopAnimation(() => talk.setValue(0));
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(talk, { toValue: 1, duration: 140, useNativeDriver: false }),
+        Animated.timing(talk, { toValue: 0, duration: 140, useNativeDriver: false }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [speaking, talk]);
+
   const translateY = Animated.add(
     bob.interpolate({ inputRange: [0, 1], outputRange: [0, -4 * s] }),
-    hop.interpolate({ inputRange: [0, 1], outputRange: [0, -22 * s] })
+    hop.interpolate({ inputRange: [0, 1], outputRange: [0, -20 * s] })
   );
   const rotate = bob.interpolate({
     inputRange: [0, 1],
     outputRange: mood === 'panicking' ? ['-6deg', '6deg'] : ['-2deg', '2deg'],
   });
 
-  // Worried and panicking Pingu narrows his eyes; cheering Pingu squeezes them shut.
-  const eyeHeight = mood === 'cheering' ? 3 * s : mood === 'panicking' ? 14 * s : 10 * s;
-  const flipperAngle = mood === 'panicking' ? -40 : mood === 'cheering' ? -25 : 12;
+  const px = (n: number) => n * s;
+
+  const eyesClosed = mood === 'cheering';
+  // The white face patch means a white sclera would be invisible, so the pupil
+  // *is* the eye: a small one reads as alarm, and angled brows above it carry
+  // the rest. Brows are kept short and central so they land on white, not on
+  // the dark head.
+  const pupil = (mood === 'panicking' ? 9 : 13) * s;
+  const pupilTop = px(42) - pupil / 2;
+  const browAngle = mood === 'panicking' ? 20 : 11;
+  const browTop = px(mood === 'panicking' ? 27 : 29);
+  const flipperAngle = mood === 'panicking' ? -50 : mood === 'cheering' ? -30 : 8;
+  const restingBeak = (mood === 'cheering' || mood === 'panicking' ? 17 : 12) * s;
+  // Height is not a native-driver property, hence useNativeDriver: false above.
+  const beakHeight = talk.interpolate({ inputRange: [0, 1], outputRange: [restingBeak, 21 * s] });
 
   return (
     <Animated.View
-      style={[{ width: 120 * s, height: 130 * s, transform: [{ translateY }, { rotate }] }]}
+      style={{ width: px(120), height: px(142), transform: [{ translateY }, { rotate }] }}
     >
-      {/* body */}
+      {/* hair tuft */}
       <View
         style={[
-          styles.body,
-          {
-            width: 92 * s,
-            height: 108 * s,
-            borderRadius: 46 * s,
-            left: 14 * s,
-            top: 8 * s,
-          },
+          styles.dark,
+          { width: px(7), height: px(14), borderRadius: px(4), left: px(55), top: px(0) },
+          { transform: [{ rotate: '-14deg' }] },
         ]}
       />
-      {/* belly */}
       <View
         style={[
-          styles.belly,
-          { width: 58 * s, height: 74 * s, borderRadius: 29 * s, left: 31 * s, top: 34 * s },
+          styles.dark,
+          { width: px(7), height: px(13), borderRadius: px(4), left: px(62), top: px(1) },
+          { transform: [{ rotate: '12deg' }] },
         ]}
       />
+
       {/* flippers */}
       <View
         style={[
-          styles.flipper,
+          styles.dark,
           {
-            width: 16 * s,
-            height: 46 * s,
-            borderRadius: 8 * s,
-            left: 4 * s,
-            top: 40 * s,
+            width: px(18),
+            height: px(46),
+            borderRadius: px(9),
+            left: px(1),
+            top: px(62),
             transform: [{ rotate: `${flipperAngle}deg` }],
           },
         ]}
       />
       <View
         style={[
-          styles.flipper,
+          styles.dark,
           {
-            width: 16 * s,
-            height: 46 * s,
-            borderRadius: 8 * s,
-            right: 4 * s,
-            top: 40 * s,
+            width: px(18),
+            height: px(46),
+            borderRadius: px(9),
+            right: px(1),
+            top: px(62),
             transform: [{ rotate: `${-flipperAngle}deg` }],
           },
         ]}
       />
+
+      {/* feet, tucked under the body */}
+      <View
+        style={[
+          styles.foot,
+          { width: px(30), height: px(12), borderRadius: px(6), left: px(22), bottom: px(2) },
+        ]}
+      />
+      <View
+        style={[
+          styles.foot,
+          { width: px(30), height: px(12), borderRadius: px(6), right: px(22), bottom: px(2) },
+        ]}
+      />
+
+      {/* body + belly */}
+      <View
+        style={[
+          styles.dark,
+          { width: px(92), height: px(86), borderRadius: px(44), left: px(14), top: px(48) },
+        ]}
+      />
+      <View
+        style={[
+          styles.snow,
+          { width: px(62), height: px(70), borderRadius: px(31), left: px(29), top: px(58) },
+        ]}
+      />
+
+      {/* head + face patch */}
+      <View
+        style={[
+          styles.dark,
+          { width: px(78), height: px(76), borderRadius: px(39), left: px(21), top: px(6) },
+        ]}
+      />
+      <View
+        style={[
+          styles.snow,
+          { width: px(64), height: px(58), borderRadius: px(32), left: px(28), top: px(20) },
+        ]}
+      />
+
+      {/* cheeks */}
+      <View
+        style={[
+          styles.cheek,
+          { width: px(13), height: px(7), borderRadius: px(4), left: px(28), top: px(53) },
+        ]}
+      />
+      <View
+        style={[
+          styles.cheek,
+          { width: px(13), height: px(7), borderRadius: px(4), right: px(28), top: px(53) },
+        ]}
+      />
+
       {/* eyes */}
-      <View
-        style={[
-          styles.eye,
-          { width: 10 * s, height: eyeHeight, borderRadius: 5 * s, left: 42 * s, top: 36 * s },
-        ]}
-      />
-      <View
-        style={[
-          styles.eye,
-          { width: 10 * s, height: eyeHeight, borderRadius: 5 * s, right: 42 * s, top: 36 * s },
-        ]}
-      />
+      {eyesClosed ? (
+        <>
+          <View
+            style={[
+              styles.dark,
+              { width: px(16), height: px(5), borderRadius: px(3), left: px(30), top: px(40) },
+            ]}
+          />
+          <View
+            style={[
+              styles.dark,
+              { width: px(16), height: px(5), borderRadius: px(3), right: px(30), top: px(40) },
+            ]}
+          />
+        </>
+      ) : (
+        <>
+          {mood === 'worried' || mood === 'panicking' ? (
+            <>
+              <View
+                style={[
+                  styles.dark,
+                  { width: px(15), height: px(4), borderRadius: px(2), left: px(35), top: browTop },
+                  { transform: [{ rotate: `-${browAngle}deg` }] },
+                ]}
+              />
+              <View
+                style={[
+                  styles.dark,
+                  { width: px(15), height: px(4), borderRadius: px(2), right: px(35), top: browTop },
+                  { transform: [{ rotate: `${browAngle}deg` }] },
+                ]}
+              />
+            </>
+          ) : null}
+          <View
+            style={[
+              styles.dark,
+              { width: pupil, height: pupil, borderRadius: pupil / 2, left: px(36), top: pupilTop },
+            ]}
+          />
+          <View
+            style={[
+              styles.dark,
+              { width: pupil, height: pupil, borderRadius: pupil / 2, right: px(36), top: pupilTop },
+            ]}
+          />
+          {/* catchlights — the single detail that makes him look alive */}
+          <View
+            style={[
+              styles.snow,
+              { width: px(4), height: px(4), borderRadius: px(2), left: px(38), top: pupilTop + px(2) },
+            ]}
+          />
+          <View
+            style={[
+              styles.snow,
+              { width: px(4), height: px(4), borderRadius: px(2), right: px(38), top: pupilTop + px(2) },
+            ]}
+          />
+        </>
+      )}
+
       {/* beak */}
-      <View
+      <Animated.View
         style={[
           styles.beak,
           {
-            width: 22 * s,
-            height: mood === 'cheering' || mood === 'panicking' ? 18 * s : 11 * s,
-            borderRadius: 6 * s,
-            left: 49 * s,
-            top: 52 * s,
+            width: px(21),
+            height: speaking ? beakHeight : restingBeak,
+            borderRadius: px(7),
+            left: px(50),
+            top: px(52),
           },
-        ]}
-      />
-      {/* feet */}
-      <View
-        style={[
-          styles.foot,
-          { width: 26 * s, height: 10 * s, borderRadius: 5 * s, left: 24 * s, bottom: 4 * s },
-        ]}
-      />
-      <View
-        style={[
-          styles.foot,
-          { width: 26 * s, height: 10 * s, borderRadius: 5 * s, right: 24 * s, bottom: 4 * s },
         ]}
       />
     </Animated.View>
@@ -159,10 +283,9 @@ export function Pingu({ mood, size = 120 }: Props) {
 }
 
 const styles = StyleSheet.create({
-  body: { position: 'absolute', backgroundColor: colors.coal },
-  belly: { position: 'absolute', backgroundColor: colors.snow },
-  flipper: { position: 'absolute', backgroundColor: colors.coal },
-  eye: { position: 'absolute', backgroundColor: colors.coal, zIndex: 2 },
-  beak: { position: 'absolute', backgroundColor: colors.beak, zIndex: 2 },
+  dark: { position: 'absolute', backgroundColor: colors.coal },
+  snow: { position: 'absolute', backgroundColor: colors.snow },
+  cheek: { position: 'absolute', backgroundColor: 'rgba(242,126,99,0.35)' },
+  beak: { position: 'absolute', backgroundColor: colors.beak },
   foot: { position: 'absolute', backgroundColor: colors.beakDark },
 });
